@@ -16,12 +16,28 @@ if ! nvidia-smi -L > /dev/null 2>&1; then
     exit 0
 fi
 
+DCGM_IMAGE="nvcr.io/nvidia/k8s/dcgm-exporter:4.2.3-4.1.3-ubuntu22.04"
+DCGM_CONTAINER_NAME="dcgm-exporter"
+
 install_dcgm_exporter() {
-    
-    # Run DCGM Exporter in a container
-    docker run -v $SPEC_FILE_ROOT/custom_dcgm_counters.csv:/etc/dcgm-exporter/custom-counters.csv \
+    # Check if the DCGM exporter container already exists (running or stopped)
+    existing=$(docker ps -a -q --filter "name=^/${DCGM_CONTAINER_NAME}$")
+    if [ -n "$existing" ]; then
+        # Container exists -- ensure it is running
+        if [ "$(docker inspect -f '{{.State.Running}}' "$DCGM_CONTAINER_NAME" 2>/dev/null)" = "true" ]; then
+            echo "DCGM Exporter container is already running."
+        else
+            echo "DCGM Exporter container exists but is stopped. Starting it."
+            docker start "$DCGM_CONTAINER_NAME"
+        fi
+        return 0
+    fi
+
+    # Run DCGM Exporter in a new container
+    docker run --name "$DCGM_CONTAINER_NAME" \
+            -v $SPEC_FILE_ROOT/custom_dcgm_counters.csv:/etc/dcgm-exporter/custom-counters.csv \
             -d --gpus all --cap-add SYS_ADMIN --restart always -p 9400:9400 \
-            nvcr.io/nvidia/k8s/dcgm-exporter:4.2.3-4.1.3-ubuntu22.04 -f /etc/dcgm-exporter/custom-counters.csv
+            "$DCGM_IMAGE" -f /etc/dcgm-exporter/custom-counters.csv
 }
 
 function add_scraper() {
